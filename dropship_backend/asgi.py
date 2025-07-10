@@ -14,6 +14,6 @@ from django.core.asgi import get_asgi_application
 os.environ.setdefault("DJANGO_SETTINGS_MODULE", "dropship_backend.settings")
 
 # Initialize Firebase
-from . import firebase_config
+# from . import firebase_config
 
 application = get_asgi_application()
