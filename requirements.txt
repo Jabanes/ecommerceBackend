@@ -8,7 +8,9 @@ cffi==1.17.1
 charset-normalizer==3.4.2
 cryptography==45.0.5
 Django==5.2.4
+django-cors-headers==4.4.0
 dnspython==2.7.0
+python-dotenv==1.0.1
 firebase-admin==6.9.0
 google-api-core==2.25.1
 google-api-python-client==2.176.0

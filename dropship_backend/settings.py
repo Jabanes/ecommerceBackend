@@ -11,19 +11,24 @@ https://docs.djangoproject.com/en/5.2/ref/settings/
 """
 
 from pathlib import Path
+import os
+from dotenv import load_dotenv
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
+
+# Load environment variables from .env file
+load_dotenv(BASE_DIR / '.env')
 
 
 # Quick-start development settings - unsuitable for production
 # See https://docs.djangoproject.com/en/5.2/howto/deployment/checklist/
 
 # SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = 'django-insecure-yegk19s=s0te-lr7^1$s%k0sabj&fty0@s%6wd1nno97r5+wj_'
+SECRET_KEY = os.getenv('DJANGO_SECRET_KEY', 'django-insecure-yegk19s=s0te-lr7^1$s%k0sabj&fty0@s%6wd1nno97r5+wj_')
 
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = True
+DEBUG = os.getenv('DEBUG', 'True') == 'True'
 
 ALLOWED_HOSTS = []
 
@@ -37,11 +42,14 @@ INSTALLED_APPS = [
     'django.contrib.sessions',
     'django.contrib.messages',
     'django.contrib.staticfiles',
+    'corsheaders',
     'products',
+    'orders',
 ]
 
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
+    'corsheaders.middleware.CorsMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
@@ -121,3 +129,30 @@ STATIC_URL = 'static/'
 # https://docs.djangoproject.com/en/5.2/ref/settings/#default-auto-field
 
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
+
+# CORS Settings
+CORS_ALLOWED_ORIGINS = [
+    "http://localhost:5173", # Standard Vite port
+    "http://localhost:3000", # Standard React dev port
+    "http://127.0.0.1:5173",
+    "http://127.0.0.1:3000",
+]
+# You can also use CORS_ALLOW_ALL_ORIGINS = True for initial development, but it's less secure.
+
+# Frontend URLs
+FRONTEND_SUCCESS_URL = os.getenv('FRONTEND_SUCCESS_URL', 'http://localhost:5173/order/success')
+FRONTEND_CANCEL_URL = os.getenv('FRONTEND_CANCEL_URL', 'http://localhost:5173/cart')
+FRONTEND_FAILURE_URL = os.getenv('FRONTEND_FAILURE_URL', 'http://localhost:5173/order/failure')
+
+
+# Custom Settings
+# PayPal
+PAYPAL_CLIENT_ID = os.getenv('PAYPAL_CLIENT_ID')
+PAYPAL_CLIENT_SECRET = os.getenv('PAYPAL_CLIENT_SECRET')
+PAYPAL_API_BASE = 'https://api-m.sandbox.paypal.com' # Use 'https://api-m.paypal.com' for production
+
+# Shopify
+SHOPIFY_STORE_NAME = os.getenv('SHOPIFY_STORE_NAME')
+SHOPIFY_API_KEY = os.getenv('SHOPIFY_API_KEY')
+SHOPIFY_API_PASSWORD = os.getenv('SHOPIFY_API_PASSWORD') # This is the Admin API access token
+SHOPIFY_API_VERSION = '2024-07'
