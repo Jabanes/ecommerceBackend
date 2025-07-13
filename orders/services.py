@@ -12,23 +12,33 @@ import json
 
 logger = logging.getLogger(__name__)
 
-# --- New Placeholder Stock Checker ---
 def check_ali_express_stock(order: Order) -> bool:
     """
-    Placeholder function to simulate a stock check.
-    In a real application, this would involve complex logic, an external API call,
-    or a manual verification step.
-    It iterates through line items stored in the order_data.
+    Checks product stock against Firestore before fulfilling an order.
+    
+    It iterates through line items from the order and checks if stock is available
+    using the `is_stock_available` function.
     """
     logger.info(f"Checking stock for Order ID: {order.id}...")
-    # For now, we'll just simulate success. Change to False to test failure path.
-    # for item in order.order_data.get('line_items', []):
-    #     variant_id = item.get('variant_id')
-    #     quantity = item.get('quantity')
-    #     if not is_stock_available(variant_id, quantity):
-    #          logger.warning(f"Stock check failed for variant {variant_id}")
-    #          return False
-    logger.info("Stock check successful (simulated).")
+    
+    line_items = order.order_data.get('line_items', [])
+    if not line_items:
+        logger.warning(f"Order {order.id} has no line items to check. Failing stock check.")
+        return False
+
+    for item in line_items:
+        variant_id = item.get('variant_id')
+        quantity = item.get('quantity')
+        
+        if not variant_id or quantity is None:
+            logger.error(f"Invalid line item in order {order.id}: {item}")
+            return False
+
+        if not is_stock_available(str(variant_id), quantity):
+            logger.warning(f"Stock check failed for variant {variant_id} with quantity {quantity} for order {order.id}")
+            return False
+            
+    logger.info(f"Stock check successful for Order ID: {order.id}.")
     return True
 
 
@@ -185,46 +195,123 @@ class PayPalService:
 # --- Firestore Service ---
 from dropship_backend.firebase_config import db
 
-def save_order_to_firestore(order_details: dict):
+def is_stock_available(variant_id_str: str, quantity: int) -> bool:
     """
-    Saves a comprehensive order object to the 'orders' collection in Firestore.
-    Uses Shopify's order number (e.g., #1003) as the document ID for consistency.
+    Checks if a specific product variant has enough stock in Firestore.
+
+    This function iterates through all products to find the matching variant.
+    NOTE: This is inefficient and will be slow if there are many products.
+    For production, consider optimizing by either fetching products directly if product IDs
+    are available in the order, or by restructuring Firestore data (e.g., a separate
+    variants collection).
     """
     try:
-        # Extract Shopify order data
-        shopify_order = order_details.get('shopify_order', {}).get('order', {})
-        if not shopify_order:
-            logger.error("No Shopify order data found in order_details")
-            return False
+        variant_id_to_find = str(variant_id_str)
+        logger.info(f"Checking stock for Variant ID: {variant_id_to_find}, Quantity: {quantity}")
+
+        products_ref = db.collection('products')
+        
+        # This streams all documents. Inefficient but necessary with current data model.
+        all_products = products_ref.stream()
+
+        for product_doc in all_products:
+            product_data = product_doc.to_dict()
+            variants = product_data.get('variants', [])
             
-        # Get the order number (e.g., 1003) NOT the order ID
+            for variant in variants:
+                variant_id = variant.get('id')
+                if str(variant_id) == variant_id_to_find:
+                    inventory = variant.get('inventory')
+                    logger.info(f"Found Variant {variant_id_to_find} in Product {product_doc.id}. Available stock: {inventory}")
+                    
+                    if inventory is not None and inventory >= quantity:
+                        logger.info(f"Stock is sufficient for Variant {variant_id_to_find}.")
+                        return True
+                    else:
+                        logger.warning(f"Insufficient stock for Variant {variant_id_to_find}. Required: {quantity}, Available: {inventory}")
+                        return False
+        
+        logger.warning(f"Variant with ID {variant_id_to_find} not found in any product.")
+        return False
+    except Exception as e:
+        logger.error(f"Error during stock check for variant {variant_id_str}: {e}")
+        logger.exception(e)  # Log stack trace
+        return False
+
+def save_order_to_firestore(order_details: dict):
+    """
+    Saves a flattened and optimized order object to the 'orders' collection in Firestore.
+    It extracts key information from the local order, PayPal, and Shopify data.
+    """
+    try:
+        # --- Extract data from the comprehensive order details ---
+        local_order_data = order_details.get('local_order', {}).get('order_data', {})
+        shopify_order = order_details.get('shopify_order', {}).get('order', {})
+        paypal_auth = order_details.get('paypal_authorization', {})
+
+        if not all([local_order_data, shopify_order, paypal_auth]):
+            logger.error("Missing critical data in order_details for Firestore.")
+            return False
+
+        # --- Safely extract nested data ---
+        purchase_unit = paypal_auth.get('purchase_units', [{}])[0]
+        paypal_authorization = purchase_unit.get('payments', {}).get('authorizations', [{}])[0]
+        
+        # --- Build the optimized Firestore document ---
         order_number = shopify_order.get('order_number')
         if not order_number:
-            logger.error("No order number found in Shopify order data")
-            logger.error(f"Shopify order data: {json.dumps(shopify_order, indent=2)}")
+            logger.error("Shopify order number is missing, cannot create Firestore document.")
             return False
             
         document_id = str(order_number)
-        logger.info(f"Using Shopify order number {document_id} as Firestore document ID")
         
-        # Add metadata to help track document creation/updates
-        order_details['metadata'] = {
-            'created_at': datetime.datetime.now().isoformat(),
-            'document_id': document_id,
-            'shopify_order_number': order_number,
-            'shopify_order_id': shopify_order.get('id'),  # Store the actual Shopify order ID as well
-            'order_name': shopify_order.get('name')  # This is usually something like "#1003"
+        # Match Shopify line items to local line items to get price
+        shopify_line_items = {str(item.get('variant_id')): item.get('price') for item in shopify_order.get('line_items', [])}
+        
+        optimized_line_items = []
+        for item in local_order_data.get('line_items', []):
+            variant_id = str(item.get('variant_id'))
+            optimized_line_items.append({
+                "quantity": item.get('quantity'),
+                "variant_id": variant_id,
+                "price_per_item": shopify_line_items.get(variant_id)
+            })
+
+        # --- Get customer email, prioritizing local data, then PayPal ---
+        customer_email = local_order_data.get('customer', {}).get('email')
+        if not customer_email:
+            # The payer object is in the main authorization response
+            customer_email = paypal_auth.get('payer', {}).get('email_address')
+            logger.info(f"Customer email not found in local order; using PayPal email: {customer_email}")
+
+        firestore_payload = {
+            "user_id": local_order_data.get('user_id'),
+            "shopify_order_id": shopify_order.get('id'),
+            "shopify_order_number": order_number,
+            "paypal_order_id": paypal_auth.get('id'),
+            "paypal_authorization_id": paypal_authorization.get('id'),
+            "amount": local_order_data.get('amount'),
+            "currency": local_order_data.get('currency'),
+            "customer_email": customer_email,
+            "customer_first_name": local_order_data.get('shipping_address', {}).get('first_name'),
+            "customer_last_name": local_order_data.get('shipping_address', {}).get('last_name'),
+            "shipping_address": local_order_data.get('shipping_address'),
+            "line_items": optimized_line_items,
+            "current_backend_status": "AUTHORIZED",
+            "created_at": datetime.datetime.now().isoformat(),
+            "last_updated_at": datetime.datetime.now().isoformat(),
         }
-        
-        # Save to Firestore using Shopify's order number as document ID
+
+        # --- Save to Firestore ---
         doc_ref = db.collection('orders').document(document_id)
-        doc_ref.set(order_details)
-        
-        logger.info(f"Successfully saved order {document_id} to Firestore with metadata: {order_details['metadata']}")
+        doc_ref.set(firestore_payload)
+
+        logger.info(f"Successfully saved optimized order {document_id} to Firestore.")
         return True
+
     except Exception as e:
-        logger.error(f"Failed to save order to Firestore: {e}")
-        logger.exception(e)  # This will log the full stack trace
+        logger.error(f"Failed to save optimized order to Firestore: {e}")
+        logger.exception(e)
         return False
 
 
