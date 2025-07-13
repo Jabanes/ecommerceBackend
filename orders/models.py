@@ -15,6 +15,8 @@ class Order(models.Model):
     user_id = models.CharField(max_length=255, db_index=True)
     
     paypal_order_id = models.CharField(max_length=255, unique=True, null=True, blank=True)
+    # NEW FIELD to store the specific authorization for capture/void
+    paypal_authorization_id = models.CharField(max_length=255, unique=True, null=True, blank=True)
     shopify_order_id = models.CharField(max_length=255, unique=True, null=True, blank=True)
     
     status = models.CharField(
@@ -37,3 +39,4 @@ class Order(models.Model):
         ordering = ['-created_at']
         verbose_name = "Order"
         verbose_name_plural = "Orders"
+
