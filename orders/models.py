@@ -6,6 +6,7 @@ class Order(models.Model):
         PENDING = 'PENDING', 'Pending'
         AUTHORIZED = 'AUTHORIZED', 'Authorized'
         CAPTURED = 'CAPTURED', 'Captured'
+        PAID = 'PAID', 'Paid' # For simulated successful payment
         FAILED = 'FAILED', 'Failed'
         CANCELLED = 'CANCELLED', 'Cancelled'
 
@@ -18,6 +19,7 @@ class Order(models.Model):
     # NEW FIELD to store the specific authorization for capture/void
     paypal_authorization_id = models.CharField(max_length=255, unique=True, null=True, blank=True)
     shopify_order_id = models.CharField(max_length=255, unique=True, null=True, blank=True)
+    shopify_order_number = models.CharField(max_length=255, null=True, blank=True)
     
     status = models.CharField(
         max_length=20,

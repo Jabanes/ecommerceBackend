@@ -13,11 +13,11 @@ def fetch_and_save_raw_products_to_json():
 
     # --- Load Credentials ---
     store_url = os.getenv("SHOPIFY_STORE_URL")
-    access_token = os.getenv("SHOPIFY_ACCESS_TOKEN")
+    access_token = os.getenv("SHOPIFY_API_PASSWORD")
     output_filename = 'rawdata.json'
     
     if not all([store_url, access_token]):
-        print("Error: Ensure SHOPIFY_STORE_URL and SHOPIFY_ACCESS_TOKEN are set in the .env file.")
+        print("Error: Ensure SHOPIFY_STORE_URL and SHOPIFY_API_PASSWORD are set in the .env file.")
         return
 
     # --- 1. Fetch products from Shopify ---

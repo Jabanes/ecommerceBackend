@@ -314,6 +314,29 @@ def save_order_to_firestore(order_details: dict):
         logger.exception(e)
         return False
 
+def update_firestore_order_status(shopify_order_number: str, new_status: str, additional_data: dict = None):
+    """
+    Updates the status of an order in Firestore and adds any additional metadata.
+    """
+    try:
+        # Note: We are using the Shopify order NUMBER as the document ID.
+        doc_ref = db.collection('orders').document(str(shopify_order_number))
+        
+        update_payload = {
+            "current_backend_status": new_status,
+            "last_updated_at": datetime.datetime.now().isoformat()
+        }
+        
+        if additional_data:
+            update_payload.update(additional_data)
+            
+        doc_ref.update(update_payload)
+        logger.info(f"Successfully updated Firestore order {shopify_order_number} to status {new_status}.")
+        return True
+    except Exception as e:
+        logger.error(f"Failed to update Firestore status for order {shopify_order_number}: {e}")
+        return False
+
 
 # --- Shopify Service ---
 
@@ -344,6 +367,25 @@ class ShopifyService:
             "Content-Type": "application/json",
             "X-Shopify-Access-Token": self.password,
         }
+
+    def get_variant_details(self, variant_id):
+        """
+        Fetches the latest details for a specific product variant from Shopify.
+        """
+        url = f"{self.base_url}/variants/{variant_id}.json"
+        logger.info(f"Fetching variant details from Shopify for variant_id: {variant_id}")
+        try:
+            response = requests.get(url, headers=self._get_headers())
+            response.raise_for_status()
+            logger.debug(f"Successfully fetched Shopify variant {variant_id}. Data: {response.text}")
+            return response.json().get('variant')
+        except requests.exceptions.HTTPError as e:
+            # Log specific Shopify error if available
+            logger.error(f"Shopify API error fetching variant {variant_id}: {e.response.status_code} - {e.response.text}")
+            raise
+        except Exception as e:
+            logger.error(f"An unexpected error occurred fetching variant {variant_id}: {e}")
+            raise
 
     def create_order(self, order_data, paypal_order_id):
         """
@@ -428,6 +470,32 @@ class ShopifyService:
         # After a successful capture transaction, Shopify *may* automatically mark the order as paid.
         # If not, you might need another API call to update the order's financial_status directly.
         # For now, creating the transaction is the correct approach.
+        return response.json()
+
+    def mark_order_as_paid_for_test(self, shopify_order_id, amount, currency, authorization_id):
+        """
+        Marks a Shopify order as 'paid' by creating a test capture transaction.
+        This is used for the E2E test flow to simulate a payment capture.
+        """
+        url = f"{self.base_url}/orders/{shopify_order_id}/transactions.json"
+        
+        payload = {
+            "transaction": {
+                "kind": "capture",
+                "status": "success",
+                "amount": amount,
+                "currency": currency,
+                "test": True,
+                "authorization": authorization_id, # Using the auth ID for the test capture
+            }
+        }
+        
+        logger.info(f"TEST MODE: Marking Shopify order {shopify_order_id} as paid with auth {authorization_id}")
+        response = requests.post(url, headers=self._get_headers(), json=payload)
+        response.raise_for_status()
+
+        # Shopify should automatically update the financial_status to 'paid'.
+        logger.info(f"Successfully posted test capture transaction for Shopify order {shopify_order_id}.")
         return response.json()
 
 
